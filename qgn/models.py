@@ -78,3 +78,51 @@ def tbg_wannier_hamiltonian(k, params=None):
     H = np.block([[h_intra,           h_inter],
                   [h_inter.conj().T,  h_intra]])
     return H
+
+
+# ── FCI triangular lattice model ──────────────────────────────────────────────
+# Three NN bond vectors of the triangular lattice (lattice constant = 1)
+# They satisfy a1 + a2 + a3 = 0.
+_FCI_A1 = np.array([1.0, 0.0])
+_FCI_A2 = np.array([-0.5,  np.sqrt(3) / 2])
+_FCI_A3 = np.array([-0.5, -np.sqrt(3) / 2])
+
+_SX = np.array([[0, 1],   [1,  0]], dtype=complex)
+_SY = np.array([[0, -1j], [1j, 0]], dtype=complex)
+_SZ = np.array([[1, 0],   [0, -1]], dtype=complex)
+
+
+def fci_triangular_hamiltonian(k, t=1.0, tp=0.2):
+    """Two-band tight-binding model for FCI on the triangular lattice.
+
+    Eq. (23) of Kourtis, Venderbos & Daghofer, PRB 86, 235118 (2012):
+
+        H_kin(k) = 2t Σ_j σ^j cos(k·a_j)  +  2t' Σ_j σ^0 cos(2k·a_j)
+
+    where σ^{1,2,3} = σ_{x,y,z} act in the 2-site unit-cell space, and
+    a_{1,2,3} are the three NN bond vectors of the triangular lattice
+    (a_1 + a_2 + a_3 = 0).
+
+    Dispersion (Eq. 24):
+        ε^± = ±2t √(Σ_j cos²(k·a_j))  +  2t' Σ_j cos(2k·a_j)
+
+    Lower band has Chern number C = ±1.
+    Near-flat bands are achieved for t'/t ≈ 0.2.
+
+    Args:
+        k:  Cartesian wave vector, shape (2,)
+        t:  NN hopping (energy unit)
+        tp: third-neighbor hopping t'
+
+    Returns:
+        H: (2, 2) Hermitian matrix
+    """
+    f1 = np.cos(k @ _FCI_A1)
+    f2 = np.cos(k @ _FCI_A2)
+    f3 = np.cos(k @ _FCI_A3)
+    g  = (np.cos(2 * k @ _FCI_A1) +
+          np.cos(2 * k @ _FCI_A2) +
+          np.cos(2 * k @ _FCI_A3))
+
+    H = 2 * t * (f1 * _SX + f2 * _SY + f3 * _SZ) + 2 * tp * g * np.eye(2, dtype=complex)
+    return H
