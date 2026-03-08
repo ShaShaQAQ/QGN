@@ -1,6 +1,8 @@
 import numpy as np
 from qgn.models import (ssh_hamiltonian, custom_tb_hamiltonian,
-                        tbg_wannier_hamiltonian, fci_triangular_hamiltonian)
+                        tbg_wannier_hamiltonian, fci_triangular_hamiltonian,
+                        haldane_hamiltonian, qwz_hamiltonian,
+                        HAL_B1, HAL_B2, QWZ_B1, QWZ_B2)
 
 
 def test_ssh_shape():
@@ -94,6 +96,120 @@ def test_fci_dispersion():
         eps_pm = np.sort([d0 - 2 * t * np.sqrt(np.sum(f**2)),
                           d0 + 2 * t * np.sqrt(np.sum(f**2))])
         np.testing.assert_allclose(eigvals, eps_pm, atol=1e-12)
+
+
+# --- haldane_hamiltonian ---
+
+def test_haldane_shape():
+    H = haldane_hamiltonian(k=np.array([0.0, 0.0]))
+    assert H.shape == (2, 2)
+
+
+def test_haldane_hermitian():
+    rng = np.random.default_rng(1)
+    for _ in range(10):
+        k = rng.uniform(-np.pi, np.pi, size=2)
+        H = haldane_hamiltonian(k, t1=1.0, t2=0.3, phi=np.pi / 2, M=0.0)
+        np.testing.assert_allclose(H, H.conj().T, atol=1e-12)
+
+
+def test_haldane_chern_number():
+    """Lower band of Haldane model (M=0, phi=pi/2) must have Chern number C=+1."""
+    from qgn.geometry import chern_number
+
+    Nk = 25
+    k1v = np.linspace(0, 1, Nk, endpoint=False)
+    k2v = np.linspace(0, 1, Nk, endpoint=False)
+    eigvecs_2d = np.zeros((Nk, Nk, 2, 2), dtype=complex)
+    for i in range(Nk):
+        for j in range(Nk):
+            k_phys = k1v[i] * HAL_B1 + k2v[j] * HAL_B2
+            _, v = np.linalg.eigh(haldane_hamiltonian(k_phys))
+            eigvecs_2d[i, j] = v
+
+    C = chern_number(eigvecs_2d, flat_bands=[0])
+    np.testing.assert_allclose(abs(C), 1.0, atol=0.05)
+
+
+def test_haldane_trivial_at_large_M():
+    """For M >> 3√3 t2 |sin phi|, the model is trivial (C≈0)."""
+    from qgn.geometry import chern_number
+
+    Nk = 20
+    k1v = np.linspace(0, 1, Nk, endpoint=False)
+    k2v = np.linspace(0, 1, Nk, endpoint=False)
+    eigvecs_2d = np.zeros((Nk, Nk, 2, 2), dtype=complex)
+    # M = 10 >> 3√3 * 0.3 * 1 ≈ 1.56 → trivial
+    for i in range(Nk):
+        for j in range(Nk):
+            k_phys = k1v[i] * HAL_B1 + k2v[j] * HAL_B2
+            _, v = np.linalg.eigh(haldane_hamiltonian(k_phys, t2=0.3, M=10.0))
+            eigvecs_2d[i, j] = v
+
+    C = chern_number(eigvecs_2d, flat_bands=[0])
+    np.testing.assert_allclose(abs(C), 0.0, atol=0.1)
+
+
+# --- qwz_hamiltonian ---
+
+def test_qwz_shape():
+    H = qwz_hamiltonian(k=np.array([0.0, 0.0]))
+    assert H.shape == (2, 2)
+
+
+def test_qwz_hermitian():
+    rng = np.random.default_rng(2)
+    for _ in range(10):
+        k = rng.uniform(-np.pi, np.pi, size=2)
+        H = qwz_hamiltonian(k, m=1.0)
+        np.testing.assert_allclose(H, H.conj().T, atol=1e-12)
+
+
+def test_qwz_traceless():
+    """QWZ Hamiltonian is traceless (pure σ-vector form)."""
+    rng = np.random.default_rng(3)
+    for _ in range(10):
+        k = rng.uniform(-np.pi, np.pi, size=2)
+        H = qwz_hamiltonian(k, m=1.0)
+        np.testing.assert_allclose(np.trace(H), 0.0, atol=1e-12)
+
+
+def test_qwz_chern_number_C1():
+    """Lower band of QWZ (m=1) must have Chern number C=+1."""
+    from qgn.geometry import chern_number
+
+    Nk = 25
+    k1v = np.linspace(0, 1, Nk, endpoint=False)
+    k2v = np.linspace(0, 1, Nk, endpoint=False)
+    eigvecs_2d = np.zeros((Nk, Nk, 2, 2), dtype=complex)
+    for i in range(Nk):
+        for j in range(Nk):
+            k_phys = np.array([(k1v[i] - 0.5) * 2 * np.pi,
+                                (k2v[j] - 0.5) * 2 * np.pi])
+            _, v = np.linalg.eigh(qwz_hamiltonian(k_phys, m=1.0))
+            eigvecs_2d[i, j] = v
+
+    C = chern_number(eigvecs_2d, flat_bands=[0])
+    np.testing.assert_allclose(abs(C), 1.0, atol=0.05)
+
+
+def test_qwz_chern_number_trivial():
+    """QWZ with m=5 (outside [0,4]) is topologically trivial."""
+    from qgn.geometry import chern_number
+
+    Nk = 20
+    k1v = np.linspace(0, 1, Nk, endpoint=False)
+    k2v = np.linspace(0, 1, Nk, endpoint=False)
+    eigvecs_2d = np.zeros((Nk, Nk, 2, 2), dtype=complex)
+    for i in range(Nk):
+        for j in range(Nk):
+            k_phys = np.array([(k1v[i] - 0.5) * 2 * np.pi,
+                                (k2v[j] - 0.5) * 2 * np.pi])
+            _, v = np.linalg.eigh(qwz_hamiltonian(k_phys, m=5.0))
+            eigvecs_2d[i, j] = v
+
+    C = chern_number(eigvecs_2d, flat_bands=[0])
+    np.testing.assert_allclose(abs(C), 0.0, atol=0.1)
 
 
 def test_fci_chern_number():

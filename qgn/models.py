@@ -126,3 +126,108 @@ def fci_triangular_hamiltonian(k, t=1.0, tp=0.2):
 
     H = 2 * t * (f1 * _SX + f2 * _SY + f3 * _SZ) + 2 * tp * g * np.eye(2, dtype=complex)
     return H
+
+
+# ── Haldane honeycomb model ────────────────────────────────────────────────────
+# Lattice: honeycomb, bond length = 1.
+# Primitive vectors (real-space):
+#   a1 = (√3, 0),  a2 = (√3/2, 3/2)
+# Reciprocal lattice vectors (satisfy ai·bj = 2π δij):
+#   b1 = (2π/√3, -2π/3),  b2 = (0, 4π/3)
+# NN vectors from A→B sublattice:
+#   δ1 = (0, 1),  δ2 = (√3/2, -1/2),  δ3 = (−√3/2, −1/2)
+# NNN vectors (CCW for A sublattice):
+#   v1 = a1,  v2 = a2,  v3 = a2 − a1
+_HAL_A1 = np.array([np.sqrt(3), 0.0])
+_HAL_A2 = np.array([np.sqrt(3) / 2, 1.5])
+_HAL_D1 = np.array([0.0, 1.0])
+_HAL_D2 = np.array([np.sqrt(3) / 2, -0.5])
+_HAL_D3 = np.array([-np.sqrt(3) / 2, -0.5])
+_HAL_V1 = _HAL_A1
+_HAL_V2 = _HAL_A2
+_HAL_V3 = _HAL_A2 - _HAL_A1
+
+# Reciprocal lattice vectors (for BZ sampling in notebook)
+HAL_B1 = np.array([2 * np.pi / np.sqrt(3), -2 * np.pi / 3])
+HAL_B2 = np.array([0.0, 4 * np.pi / 3])
+
+
+def haldane_hamiltonian(k, t1=1.0, t2=0.3, phi=np.pi / 2, M=0.0):
+    """Haldane honeycomb model (Haldane 1988).
+
+    H(k) = [[H_AA, h_AB],
+             [h_AB*, H_BB]]
+
+    where:
+        h_AB = t1 * Σ_j exp(i k·δ_j)             (NN, off-diagonal)
+        H_AA = +M + 2t2 Σ_i cos(k·v_i + φ)       (NNN for A sublattice)
+        H_BB = −M + 2t2 Σ_i cos(k·v_i − φ)       (NNN for B sublattice, opposite chirality)
+
+    Lattice: honeycomb, bond length 1.
+    Primitive vectors: a1=(√3,0), a2=(√3/2,3/2).
+    NNN vectors (CCW from A): v1=a1, v2=a2, v3=a2−a1.
+
+    Topological phase (C = +1) for |M| < 3√3 t2 |sin φ|.
+    With M=0, φ=π/2: always in C=+1 phase for t2≠0.
+
+    Args:
+        k:   Cartesian wave vector, shape (2,)
+        t1:  NN hopping (energy unit)
+        t2:  NNN hopping
+        phi: NNN phase (π/2 gives maximal gap and C=+1)
+        M:   sublattice staggered potential (breaks inversion)
+
+    Returns:
+        H: (2, 2) Hermitian matrix
+    """
+    h_AB = t1 * (np.exp(1j * np.dot(k, _HAL_D1))
+                 + np.exp(1j * np.dot(k, _HAL_D2))
+                 + np.exp(1j * np.dot(k, _HAL_D3)))
+
+    nnn_A = 2 * t2 * (np.cos(np.dot(k, _HAL_V1) + phi)
+                      + np.cos(np.dot(k, _HAL_V2) + phi)
+                      + np.cos(np.dot(k, _HAL_V3) + phi))
+    nnn_B = 2 * t2 * (np.cos(np.dot(k, _HAL_V1) - phi)
+                      + np.cos(np.dot(k, _HAL_V2) - phi)
+                      + np.cos(np.dot(k, _HAL_V3) - phi))
+
+    H_AA = M + nnn_A
+    H_BB = -M + nnn_B
+    return np.array([[H_AA, h_AB], [np.conj(h_AB), H_BB]], dtype=complex)
+
+
+# ── QWZ square-lattice Chern insulator ────────────────────────────────────────
+# Qi, Wu, Zhang (2006) — simplest lattice model of a 2D Chern insulator.
+# Physically related to the Tešanović (1989) flux-phase insulator (review §2.3):
+# both are 2-band square-lattice models with C=±1, no external magnetic field.
+#
+# BZ: kx, ky ∈ (−π, π].  Primitive vectors a1=(1,0), a2=(0,1).
+# Reciprocal lattice: B1=(2π,0), B2=(0,2π).
+QWZ_B1 = np.array([2 * np.pi, 0.0])
+QWZ_B2 = np.array([0.0, 2 * np.pi])
+
+
+def qwz_hamiltonian(k, m=1.0):
+    """Qi–Wu–Zhang (2006) Chern insulator on a square lattice.
+
+    H(k) = sin(kx)·σx + sin(ky)·σy + (2 − m − cos(kx) − cos(ky))·σz
+
+    Chern number of the lower band:
+        C = +1  for  0 < m < 2
+        C = −1  for  2 < m < 4
+        C =  0  otherwise
+
+    Related to the Tešanović (1989) flux-phase model (review §2.3): both are
+    2-band square-lattice models with C=±1 bands and spontaneous AHE (σ_xy=e²/h).
+
+    Args:
+        k: Cartesian wave vector (kx, ky), BZ ∈ (−π, π]², shape (2,)
+        m: mass parameter (default 1.0 → C=+1 phase)
+
+    Returns:
+        H: (2, 2) Hermitian matrix
+    """
+    kx, ky = k[0], k[1]
+    dz  = 2.0 - m - np.cos(kx) - np.cos(ky)
+    hAB = np.sin(kx) + 1j * np.sin(ky)
+    return np.array([[dz, hAB], [np.conj(hAB), -dz]], dtype=complex)
