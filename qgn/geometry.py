@@ -108,3 +108,45 @@ def quantum_distance(P_k, P_kp, n_flat):
     """
     overlap = np.real(np.trace(P_k @ P_kp))
     return np.sqrt(max(n_flat - overlap, 0.0))
+
+
+def fubini_study_metric_2d(eigvecs_2d, flat_bands, dk1, dk2):
+    """Fubini-Study metric tensor on a 2D k-grid.
+
+    The quantum geometric tensor (QGT) decomposes as:
+        T_{ij}(k) = g_{ij}(k) − (i/2) Ω_{ij}(k)
+
+    where the Fubini-Study metric is the real (symmetric) part:
+        g_{ij}(k) = (1/2) Re[ Tr[(∂_i P)(∂_j P)] ]
+
+    and the Berry curvature is (−2) times the imaginary antisymmetric part:
+        Ω(k)     = −2 Im[ Tr[P ∂_1 P ∂_2 P] ]   (use berry_curvature_grid for this)
+
+    Idempotency of P implies that (1/2) Tr[(∂_i P)(∂_j P)] is real and equals
+    the standard Fubini-Study metric for a rank-N_flat projector.
+
+    Trace inequality  (necessary for FCI):   g_{11} + g_{22} ≥ |Ω|
+    Determinant equality  (ideal Chern band): det[g] = (Ω/2)²  AND  tr[g] = |Ω|
+
+    Args:
+        eigvecs_2d: (Nk1, Nk2, Norb, Norb) eigenvectors
+        flat_bands: list of band indices in the flat-band subspace
+        dk1, dk2:  grid spacing in fractional BZ coordinates (1/Nk1, 1/Nk2)
+
+    Returns:
+        g11, g12, g22: (Nk1, Nk2) metric tensor components
+    """
+    Nk1, Nk2 = eigvecs_2d.shape[:2]
+    P = projection_matrix_from_vecs(
+        eigvecs_2d.reshape(Nk1 * Nk2, *eigvecs_2d.shape[2:]), flat_bands
+    ).reshape(Nk1, Nk2, *eigvecs_2d.shape[2:])
+
+    dP1 = np.gradient(P, dk1, axis=0)
+    dP2 = np.gradient(P, dk2, axis=1)
+
+    # g_{ij} = (1/2) Re[ Tr[(∂_i P)(∂_j P)] ]
+    # Tr[AB] = Σ_{ab} A_{ab} B_{ba}  →  einsum '...ab,...ba->...'
+    g11 = 0.5 * np.real(np.einsum('...ab,...ba->...', dP1, dP1))
+    g22 = 0.5 * np.real(np.einsum('...ab,...ba->...', dP2, dP2))
+    g12 = 0.5 * np.real(np.einsum('...ab,...ba->...', dP1, dP2))
+    return g11, g12, g22

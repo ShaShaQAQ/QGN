@@ -61,16 +61,16 @@ def nesting_operator(P, Q_mat, k_grid, Q_vec, channel='pp'):
     Q_minus = _interpolate_P_1d(Q_mat, k_grid, k_minus)  # Q(k - Q/2)
 
     if channel == 'pp':
-        # term1[k, μ', ν, μ, ν'] = P*_{μ'μ}(k+Q/2) * Q_{νν'}(k-Q/2)
-        # einsum: P_plus.conj()[k,a,b] * Q_minus[k,c,d] -> [k,a,c,b,d]
-        term1 = np.einsum('kab,kcd->kacbd', P_plus.conj(), Q_minus)
-        # term2[k, μ', ν, μ, ν'] = Q*_{μ'μ}(k+Q/2) * P_{νν'}(k-Q/2)
-        term2 = np.einsum('kab,kcd->kacbd', Q_plus.conj(), P_minus)
+        # Π^{pp,Q}_{μ'ν';μν} = P*_{μ'μ}(k+Q/2) Q_{νν'}(k-Q/2) + (P↔Q)
+        # row compound = (μ',ν') = (a,d), col compound = (μ,ν) = (b,c)
+        # einsum: P*.conj()[k,a,b] * Q[k,c,d] -> [k, a, d, b, c]
+        term1 = np.einsum('kab,kcd->kadbc', P_plus.conj(), Q_minus)
+        term2 = np.einsum('kab,kcd->kadbc', Q_plus.conj(), P_minus)
     else:  # ph channel
-        # term1[k, μ', ν, μ, ν'] = P_{μ'μ}(k+Q/2) * Q_{νν'}(k-Q/2)
-        term1 = np.einsum('kab,kcd->kacbd', P_plus, Q_minus)
-        # term2[k, μ', ν, μ, ν'] = Q_{μ'μ}(k+Q/2) * P_{νν'}(k-Q/2)
-        term2 = np.einsum('kab,kcd->kacbd', Q_plus, P_minus)
+        # Π^{ph,Q}_{μ'ν';μν} = P_{μ'μ}(k+Q/2) Q_{νν'}(k-Q/2) + (P↔Q)
+        # row compound = (μ',ν') = (a,d), col compound = (μ,ν) = (b,c)
+        term1 = np.einsum('kab,kcd->kadbc', P_plus, Q_minus)
+        term2 = np.einsum('kab,kcd->kadbc', Q_plus, P_minus)
 
     # Sum over k and reshape to (Norb², Norb²)
     # Pi_raw[μ', ν, μ, ν'] summed over k -> reshape to [(μ'ν), (μν')]
@@ -98,6 +98,63 @@ def nestability_map(P, Q_mat, k_grid, Q_grid, channel='pp'):
         Pi = nesting_operator(P, Q_mat, k_grid, Q, channel)
         omega[i] = np.linalg.eigvalsh(Pi).min()
     return np.maximum(omega, 0.0)   # clip tiny numerical negatives
+
+
+def nestability_map_2d(eigvecs_2d, channel='ph'):
+    """Compute ω̃₀^Q = λ_min(Π^Q) on a 2D BZ grid using periodic roll shifts.
+
+    Evaluates Q on a sub-grid where Q/2 is also a valid grid point, i.e.,
+    Q-indices (q1, q2) run over even integers 0, 2, 4, ..., Nk−2,
+    giving a (Nk//2) × (Nk//2) nestability map at half the k-grid resolution.
+
+    Args:
+        eigvecs_2d: (Nk1, Nk2, Norb, Norb) eigenvectors on uniform BZ grid
+        channel:    'ph' (particle-hole, CDW) or 'pp' (particle-particle, SC)
+
+    Returns:
+        omega_2d:   (Nk1//2, Nk2//2) nestability map clipped to ≥ 0
+        q1_frac:    (Nk1//2,) Q-vector fractional coordinates along B1
+        q2_frac:    (Nk2//2,) Q-vector fractional coordinates along B2
+    """
+    Nk1, Nk2, Norb, _ = eigvecs_2d.shape
+    nq1, nq2 = Nk1 // 2, Nk2 // 2
+
+    # Build flat-band projector on 2D grid
+    from qgn.geometry import projection_matrix_from_vecs
+    P2 = projection_matrix_from_vecs(
+        eigvecs_2d.reshape(Nk1 * Nk2, Norb, Norb), [0]
+    ).reshape(Nk1, Nk2, Norb, Norb)
+    I_orb = np.eye(Norb, dtype=complex)
+    Q2 = I_orb[None, None] - P2        # (Nk1, Nk2, Norb, Norb)
+
+    omega_2d = np.zeros((nq1, nq2))
+
+    for iq1 in range(nq1):
+        for iq2 in range(nq2):
+            dq1 = iq1          # half-Q shift index along axis 0
+            dq2 = iq2          # half-Q shift index along axis 1
+
+            P_plus  = np.roll(np.roll(P2,  dq1, axis=0),  dq2, axis=1)
+            P_minus = np.roll(np.roll(P2, -dq1, axis=0), -dq2, axis=1)
+            Q_plus  = np.roll(np.roll(Q2,  dq1, axis=0),  dq2, axis=1)
+            Q_minus = np.roll(np.roll(Q2, -dq1, axis=0), -dq2, axis=1)
+
+            if channel == 'ph':
+                term1 = np.einsum('...ab,...cd->...adbc', P_plus,        Q_minus)
+                term2 = np.einsum('...ab,...cd->...adbc', Q_plus,        P_minus)
+            else:  # pp
+                term1 = np.einsum('...ab,...cd->...adbc', P_plus.conj(), Q_minus)
+                term2 = np.einsum('...ab,...cd->...adbc', Q_plus.conj(), P_minus)
+
+            Pi_raw = (term1 + term2).mean(axis=(0, 1))   # (Norb,Norb,Norb,Norb)
+            Pi = Pi_raw.reshape(Norb ** 2, Norb ** 2)
+            Pi = (Pi + Pi.conj().T) / 2
+            omega_2d[iq1, iq2] = np.linalg.eigvalsh(Pi).min()
+
+    omega_2d = np.maximum(omega_2d, 0.0)
+    q1_frac = np.arange(nq1) / Nk1  * 2   # Q in [0,1) fractional
+    q2_frac = np.arange(nq2) / Nk2  * 2
+    return omega_2d, q1_frac, q2_frac
 
 
 def nesting_matrix(P, Q_mat, k_grid, Q_vec, channel='pp', tol=1e-4):

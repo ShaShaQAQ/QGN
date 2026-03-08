@@ -128,6 +128,68 @@ def fci_triangular_hamiltonian(k, t=1.0, tp=0.2):
     return H
 
 
+# ── Checkerboard lattice Chern-band model ─────────────────────────────────────
+# Lu, Wu, Chen, Sun & Meng, arXiv:2401.00363 (2024), Eq. (1); original model in
+# K. Sun, Z. Gu, H. Katsura & S. Das Sarma, PRL 106, 236803 (2011).
+#
+# Two-band spinless fermion model on the checkerboard lattice.
+# Unit cell: A at (0,0) and B at (1/2,1/2); primitive vectors a1=(0,1), a2=(1,0).
+# BZ: kx, ky ∈ [−π, π].
+#
+# Hoppings:
+#   NN  (t, phase ±φ):  A–B at distance 1/√2, alternating-sign loop-current pattern
+#   NNN (±t'):           A–A and B–B at distance 1, opposite sign per sublattice
+#   NNNN (t''):          A–A and B–B at distance √2 (diagonal), same sign
+#
+# Default parameters give: W ≈ 0.088, Δ ≈ 2.343, C = +1.
+_CB_TP_DEFAULT  =  1.0 / (2.0 + np.sqrt(2.0))    # = (2−√2)/2
+_CB_TPP_DEFAULT = -1.0 / (2.0 + 2.0*np.sqrt(2.0))# = −(√2−1)/2;  t' + |t''| = t/2
+
+# Reciprocal lattice vectors (for notebook use)
+CB_B1 = np.array([2 * np.pi, 0.0])
+CB_B2 = np.array([0.0, 2 * np.pi])
+
+
+def checkerboard_hamiltonian(k, t=1.0, tp=None, tpp=None, phi=np.pi / 4):
+    """Checkerboard lattice two-band Chern-insulator Hamiltonian.
+
+    H(k) = [[h_AA,   h_AB  ],
+             [h_AB*, h_BB  ]]
+
+    where  h_AB = t[ e^{+iφ} − e^{−iφ}e^{−ikx} + e^{−iφ}e^{−iky} − e^{+iφ}e^{−i(kx+ky)} ]
+           h_AA = +2t' (cos kx + cos ky) + 2t'' (cos(kx+ky) + cos(kx−ky))
+           h_BB = −2t' (cos kx + cos ky) + 2t'' (cos(kx+ky) + cos(kx−ky))
+
+    The ±-sign alternation of NN bonds (loop current, φ = π/4) creates a flux
+    of π/2 per unit cell. Together with the staggered NNN and diagonal NNNN, the
+    lower band becomes nearly flat with Chern number C = +1.
+
+    Args:
+        k:   Cartesian wave vector (kx, ky), BZ ∈ (−π, π]², shape (2,)
+        t:   NN hopping (energy unit)
+        tp:  NNN hopping magnitude (default 1/(2+√2))
+        tpp: NNNN hopping (default −1/(2+2√2)); flat-band condition: t' + |t''| = t/2
+        phi: loop-current phase (default π/4)
+
+    Returns:
+        H: (2, 2) Hermitian matrix
+    """
+    if tp  is None: tp  = _CB_TP_DEFAULT
+    if tpp is None: tpp = _CB_TPP_DEFAULT
+    kx, ky = k[0], k[1]
+    # Off-diagonal: NN A→B with alternating loop-current sign
+    h_ab = t * ( np.exp( 1j * phi)
+               - np.exp(-1j * phi) * np.exp(-1j * kx)
+               + np.exp(-1j * phi) * np.exp(-1j * ky)
+               - np.exp( 1j * phi) * np.exp(-1j * (kx + ky)))
+    # Diagonal: NNN (staggered) + NNNN (uniform diagonal)
+    nnn  = 2.0 * tp  * (np.cos(kx) + np.cos(ky))
+    nnnn = 2.0 * tpp * (np.cos(kx + ky) + np.cos(kx - ky))
+    h_aa =  nnn + nnnn
+    h_bb = -nnn + nnnn
+    return np.array([[h_aa, h_ab], [np.conj(h_ab), h_bb]], dtype=complex)
+
+
 # ── Haldane honeycomb model ────────────────────────────────────────────────────
 # Lattice: honeycomb, bond length = 1.
 # Primitive vectors (real-space):
